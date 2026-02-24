@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>WG Plan</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div id="loginView" class="hidden">
+    <div class="login-container">
+      <h1>WG PLAN</h1>
+      <p>Putz- & Haushaltsliste</p>
+      <div class="login-buttons">
+        <button id="loginWoody">Woody</button>
+        <button id="loginMarkus">Markus</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="appView">
+    <header class="main-header">
+      <div class="user-info">
+        <h1 id="userNameDisplay">MARKUS</h1>
+        <p>Deine Wochen Aufgaben</p>
+      </div>
+      <div class="user-icon" id="switchBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      </div>
+    </header>
+
+    <section class="orange-card-layer">
+      <p class="date-line" id="dateLine"></p>
+      <div class="kw-display">
+        <span class="kw-number" id="kwNumber">--</span>
+        <span class="kw-label">KW</span>
+      </div>
+      <ul class="weekly-task-list" id="weeklyTasks"></ul>
+    </section>
+
+    <main class="stacked-beige-layer">
+      <h2 class="section-title">Nach Bedarf</h2>
+      <div id="generalTasks"></div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
