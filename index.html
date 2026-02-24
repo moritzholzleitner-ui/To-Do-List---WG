@@ -11,7 +11,7 @@
   <div id="loginView" class="hidden">
     <div class="login-container">
       <h1>WG PLAN</h1>
-      <p>Putz- & Haushaltsliste</p>
+      <p class="login-sub">Putz- & Haushaltsliste</p>
       <div class="login-buttons">
         <button id="loginWoody">Woody</button>
         <button id="loginMarkus">Markus</button>
@@ -22,7 +22,7 @@
   <div id="appView">
     <header class="main-header">
       <div class="user-info">
-        <h1 id="userNameDisplay">MARKUS</h1>
+        <h1 id="userNameDisplay">NAME</h1>
         <p>Deine Wochen Aufgaben</p>
       </div>
       <div class="user-icon" id="switchBtn">
@@ -34,10 +34,14 @@
     </header>
 
     <section class="orange-card-layer">
-      <p class="date-line" id="dateLine"></p>
-      <div class="kw-display">
-        <span class="kw-number" id="kwNumber">--</span>
-        <span class="kw-label">KW</span>
+      <div class="orange-header">
+        <div class="orange-header-left">
+          <span class="kw-label-top">KW</span>
+          <p class="date-line" id="dateLine"></p>
+        </div>
+        <div class="orange-header-right">
+          <span class="kw-number-big" id="kwNumber">09</span>
+        </div>
       </div>
       <ul class="weekly-task-list" id="weeklyTasks"></ul>
     </section>
@@ -48,17 +52,16 @@
 
       <div class="overview-section">
         <button id="toggleOverview" class="btn-minimal">Übersicht anzeigen ↓</button>
-        <div id="overviewContent" class="hidden-overview">
+        <div id="overviewContent" class="hidden">
           <table class="rotation-table">
             <thead>
               <tr>
-                <th>KW</th>
-                <th>Woody</th>
-                <th>Markus</th>
+                <th style="width: 20%;">KW</th>
+                <th style="width: 40%;">Woody</th>
+                <th style="width: 40%;">Markus</th>
               </tr>
             </thead>
-            <tbody id="rotationBody">
-              </tbody>
+            <tbody id="rotationBody"></tbody>
           </table>
         </div>
       </div>
