@@ -1,13 +1,15 @@
 const PEOPLE = ["Woody", "Markus"];
-const LS = { 
-  me: "wg.me", 
-  general: "wg.generalState", 
-  startWeek: "wg.startWeek",
-  dailyDone: "wg.dailyDoneTasks" 
-};
+const LS = { me: "wg.me", general: "wg.generalState", startWeek: "wg.startWeek", dailyDone: "wg.dailyDoneTasks" };
 
-const WEEK_A = ["Papier raustragen (Dienstag)", "Bad putzen", "Küche wischen"];
-const WEEK_B = ["Papier raustragen (Dienstag)", "WC putzen", "Wohnung staubsaugen / wischen", "Geschirrspüler-Sieb reinigen"];
+// Alle Aufgaben zusammengefasst
+const ALL_FIXED = [
+  "Papier raustragen (Dienstag)",
+  "Bad putzen",
+  "WC putzen",
+  "Küche wischen",
+  "Wohnung staubsaugen / wischen",
+  "Geschirrspüler-Sieb reinigen"
+];
 
 const GENERAL = [
   { id: "trash", label: "Restmüll raustragen" },
@@ -16,10 +18,7 @@ const GENERAL = [
 ];
 
 function pad2(n) { return String(n).padStart(2, "0"); }
-function todayFullStr() {
-    const d = new Date();
-    return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
-}
+function todayFullStr() { const d = new Date(); return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`; }
 
 function isoWeek(date = new Date()) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -29,26 +28,30 @@ function isoWeek(date = new Date()) {
   return { year: d.getUTCFullYear(), week: Math.ceil((((d - yearStart) / 86400000) + 1) / 7) };
 }
 
-function animateRemoval(element, callback) {
-    element.classList.add('fade-out');
-    setTimeout(callback, 300);
-}
+function animateRemoval(element, callback) { element.classList.add('fade-out'); setTimeout(callback, 300); }
 
-function getWeeklyList(me) {
-  const now = isoWeek(new Date());
-  // Start-Anker KW 6 sorgt dafür, dass Markus diese Woche (KW 9) Woche B (WC) hat
-  let start = { year: 2026, week: 6 }; 
-  const diff = (now.year * 53 + now.week) - (start.year * 53 + start.week);
+/**
+ * 4-Wochen-Rhythmus Logik (Start KW 6):
+ * KW 9 (cycle 3): Markus (Big Clean + Papier) | Woody (Frei)
+ * KW 10 (cycle 0): Woody (Papier) | Markus (Frei)
+ * KW 11 (cycle 1): Woody (Big Clean + Papier) | Markus (Frei)
+ * KW 12 (cycle 2): Markus (Papier) | Woody (Frei)
+ */
+function getPlanForWeek(targetKW, person) {
+  const startKW = 6; 
+  const diff = targetKW - startKW;
   const cycle = ((diff % 4) + 4) % 4;
 
-  if (me === "Woody") {
-    if (cycle === 0) return WEEK_A;
-    if (cycle === 2) return WEEK_B;
-    return null;
+  if (person === "Woody") {
+    if (cycle === 1) return "Putzwoche";
+    if (cycle === 3) return "Frei";
+    if (cycle === 0) return "Papier";
+    return "Frei";
   } else {
-    if (cycle === 1) return WEEK_A;
-    if (cycle === 3) return WEEK_B;
-    return null;
+    if (cycle === 3) return "Putzwoche";
+    if (cycle === 1) return "Frei";
+    if (cycle === 2) return "Papier";
+    return "Frei";
   }
 }
 
@@ -69,44 +72,33 @@ function render() {
   document.getElementById("dateLine").textContent = `Heute: ${todayFullStr()}`;
 
   // --- WOCHENAUFGABEN ---
-  const list = getWeeklyList(me);
+  const currentPlan = getPlanForWeek(w.week, me);
   const ul = document.getElementById("weeklyTasks");
   ul.innerHTML = "";
 
   let dailyDoneState = JSON.parse(localStorage.getItem(LS.dailyDone)) || { date: todayFullStr(), tasks: [] };
-  
-  // INITIAL-FIX: Wenn heute Dienstag ist und Markus Papier geleert hat, füge es hinzu
-  if (dailyDoneState.date === todayFullStr() && dailyDoneState.tasks.length === 0) {
-      dailyDoneState.tasks.push("Papier raustragen (Dienstag)");
-      localStorage.setItem(LS.dailyDone, JSON.stringify(dailyDoneState));
-  }
+  if (dailyDoneState.date !== todayFullStr()) dailyDoneState = { date: todayFullStr(), tasks: [] };
 
-  if (!list) {
+  if (currentPlan === "Frei") {
     const li = document.createElement("li");
-    li.textContent = "Freie Woche ✨";
-    li.style.opacity = "0.5";
-    li.style.listStyle = "none";
+    li.textContent = "Diese Woche hast du frei"; 
+    li.style.opacity = "0.5"; li.style.listStyle = "none";
     ul.appendChild(li);
   } else {
-    list.forEach(t => {
+    const tasksToShow = (currentPlan === "Putzwoche") ? ALL_FIXED : ["Papier raustragen (Dienstag)"];
+    tasksToShow.forEach(t => {
       if (dailyDoneState.tasks.includes(t)) return;
       const li = document.createElement("li");
       li.textContent = t;
-      li.onclick = () => {
-        animateRemoval(li, () => {
-            dailyDoneState.tasks.push(t);
-            localStorage.setItem(LS.dailyDone, JSON.stringify(dailyDoneState));
-            render();
-        });
-      };
+      li.onclick = () => { animateRemoval(li, () => { dailyDoneState.tasks.push(t); localStorage.setItem(LS.dailyDone, JSON.stringify(dailyDoneState)); render(); }); };
       ul.appendChild(li);
     });
   }
 
-  // --- ALLGEMEINE AUFGABEN (STAND KORRIGIERT) ---
+  // --- NACH BEDARF ---
   const state = JSON.parse(localStorage.getItem(LS.general)) || {
     trash: { next: "Woody", lastDone: "Markus (24.02.)" },
-    plastic: { next: "Markus", lastDone: "Woody (vor Ferien)" },
+    plastic: { next: "Markus", lastDone: "Woody (24.02.)" },
     pfand: { next: "Markus", lastDone: "Woody (24.02.)" }
   };
 
@@ -114,7 +106,6 @@ function render() {
   wrap.innerHTML = "";
   GENERAL.forEach(g => {
     if (state[g.id].next !== me) return;
-
     const item = document.createElement("div");
     item.className = "history-item";
     item.innerHTML = `
@@ -125,20 +116,34 @@ function render() {
       <button class="btn-done">ERLEDIGT</button>
     `;
     item.querySelector("button").onclick = () => {
-        animateRemoval(item, () => {
-            state[g.id].lastDone = `${me} (${pad2(new Date().getDate())}.${pad2(new Date().getMonth()+1)}.)`;
-            state[g.id].next = me === "Woody" ? "Markus" : "Woody";
-            localStorage.setItem(LS.general, JSON.stringify(state));
-            render();
-        });
+      animateRemoval(item, () => {
+        state[g.id].lastDone = `${me} (${pad2(new Date().getDate())}.${pad2(new Date().getMonth()+1)}.)`;
+        state[g.id].next = me === "Woody" ? "Markus" : "Woody";
+        localStorage.setItem(LS.general, JSON.stringify(state));
+        render();
+      });
     };
     wrap.appendChild(item);
   });
 
-  if (wrap.children.length === 0) {
-      wrap.innerHTML = '<p style="opacity: 0.5; text-align: center; margin-top: 20px;">Alles erledigt für dich!</p>';
+  // Übersicht Tabelle
+  const rotationBody = document.getElementById("rotationBody");
+  rotationBody.innerHTML = "";
+  for (let i = 0; i < 6; i++) {
+    const kw = w.week + i;
+    const row = document.createElement("tr");
+    if (i === 0) row.className = "current-kw";
+    row.innerHTML = `<td>${kw}</td><td>${getPlanForWeek(kw, "Woody")}</td><td>${getPlanForWeek(kw, "Markus")}</td>`;
+    rotationBody.appendChild(row);
   }
 }
+
+// UI Initialisierung
+document.getElementById("toggleOverview").onclick = function() {
+  const content = document.getElementById("overviewContent");
+  content.classList.toggle("hidden");
+  this.textContent = content.classList.contains("hidden") ? "Übersicht anzeigen ↓" : "Übersicht ausblenden ↑";
+};
 
 document.getElementById("loginWoody").onclick = () => { localStorage.setItem(LS.me, "Woody"); render(); };
 document.getElementById("loginMarkus").onclick = () => { localStorage.setItem(LS.me, "Markus"); render(); };
