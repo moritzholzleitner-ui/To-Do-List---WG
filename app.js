@@ -1,17 +1,23 @@
-/* app.js — WG Plan (Woody/Markus) + Übersicht (fix) + Fairer Plan + Firebase Live-Sync (Realtime DB)
-   WICHTIG:
-   - In index.html VOR app.js einbinden:
-     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+/* app.js — WG Plan (NFC-ready)
+   ✅ fragt JEDES MAL "Wer bist du?" (kein User-Speichern im localStorage)
+   ✅ Firebase Realtime DB Live-Sync (gleicher Stand auf allen Geräten)
+   ✅ Übersicht (12 Wochen) funktioniert über Jahreswechsel
+   ✅ Fairer Wochenplan: WC und Bad nie zusammen bei gleicher Person + Split von WC vs Küche/Saugen
+
+   WICHTIG in index.html VOR app.js einbinden:
+   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 */
 
 const PEOPLE = ["Woody", "Markus"];
 const LS = {
-  me: "wg.me",
   general: "wg.generalState",
   startWeek: "wg.startWeek",
   dailyDone: "wg.dailyDoneTasks"
 };
+
+// NFC-Flow: User nur temporär (jede Session neu auswählen)
+let CURRENT_USER = null;
 
 const GENERAL = [
   { id: "trash", label: "Restmüll raustragen" },
@@ -39,7 +45,7 @@ function isoWeek(date = new Date()) {
   };
 }
 
-// Übersicht: +7 Tage (funktioniert über Jahreswechsel)
+// Übersicht: +7 Tage (sicher über Jahreswechsel)
 function addDays(date, days) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
@@ -61,26 +67,25 @@ function mod(n, m) {
 
 /* =========================
    FAIRER WOCHENPLAN
-   Ziele:
    - Papier jede Woche abwechselnd
-   - "Putzblock" alle 2 Wochen aktiv
-     -> WC bei Person A, Küche+Saugen bei Person B (split)
-   - Bad alle 3 Wochen, aber NIE in derselben Woche wie WC bei derselben Person
+   - "Putzblock" alle 2 Wochen aktiv:
+       WC bei Person A, Küche+Saugen bei Person B
+   - Bad alle 3 Wochen, NIE in derselben Woche wie WC bei gleicher Person
    - Sieb alle 4 Wochen
    ========================= */
 
 function getWeekPlan(kw) {
-  const start = 9;       // Anker-KW (dein bisheriges System)
+  const start = 9;       // Anker-KW
   const diff = kw - start;
 
   const plan = { Woody: [], Markus: [] };
   const add = (p, t) => plan[p].push(t);
 
-  // 1) Papier (jede Woche abwechselnd)
+  // Papier (jede Woche abwechselnd)
   const papierTurn = (mod(diff, 2) === 0) ? "Markus" : "Woody";
   add(papierTurn, "Papier raustragen (Di)");
 
-  // 2) Putzblock alle 2 Wochen: WC / Küche / Saugen splitten
+  // Putzblock alle 2 Wochen: splitten
   if (mod(diff, 2) === 0) {
     const wcTurn = (mod(Math.floor(diff / 2), 2) === 0) ? "Markus" : "Woody";
     const other = togglePerson(wcTurn);
@@ -90,23 +95,20 @@ function getWeekPlan(kw) {
     add(other, "Staubsaugen / wischen");
   }
 
-  // 3) Bad alle 3 Wochen, aber nicht zusammen mit WC bei gleicher Person
+  // Bad alle 3 Wochen, aber nicht zusammen mit WC bei gleicher Person
   if (mod(diff, 3) === 0) {
     let badTurn = (mod(Math.floor(diff / 3), 2) === 0) ? "Markus" : "Woody";
-
-    if (plan[badTurn].includes("WC putzen")) {
-      badTurn = togglePerson(badTurn);
-    }
+    if (plan[badTurn].includes("WC putzen")) badTurn = togglePerson(badTurn);
     add(badTurn, "Bad putzen");
   }
 
-  // 4) Sieb alle 4 Wochen
+  // Sieb alle 4 Wochen
   if (mod(diff, 4) === 0) {
     const siebTurn = (mod(Math.floor(diff / 4), 2) === 0) ? "Markus" : "Woody";
     add(siebTurn, "Spülmaschine Sieb");
   }
 
-  // Optional: harte Kappung (max 3 Tasks/Person) -> shift Küche/Saugen wenn nötig
+  // Optional: Kappung (max 3 Tasks/Person) -> shift Küche/Saugen wenn nötig
   const cap = 3;
   for (const p of ["Woody", "Markus"]) {
     const o = togglePerson(p);
@@ -132,7 +134,7 @@ function getTasksForWeek(kw, person) {
 }
 
 /* =========================
-   GENERAL STATE: robust
+   GENERAL STATE: robust defaults
    ========================= */
 
 function getGeneralStateSafe() {
@@ -173,20 +175,23 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-// Ein gemeinsamer "Raum" für euch — kann so bleiben
+// Raum für euch (kann bleiben)
 const ROOM_ID = "woody-markus";
 const roomRef = db.ref("rooms/" + ROOM_ID);
 
-// Schutz gegen Loop/Overwrites
-let hasRemoteOnce = false;
+// Schutz gegen Write-Loops
 let applyingRemote = false;
 
 function getLocalSyncState() {
-  return {
-    general: JSON.parse(localStorage.getItem(LS.general) || "{}"),
-    dailyDone: JSON.parse(localStorage.getItem(LS.dailyDone) || "{}"),
-    startWeek: JSON.parse(localStorage.getItem(LS.startWeek) || "null")
-  };
+  let general = {};
+  let dailyDone = {};
+  let startWeek = null;
+
+  try { general = JSON.parse(localStorage.getItem(LS.general) || "{}"); } catch { general = {}; }
+  try { dailyDone = JSON.parse(localStorage.getItem(LS.dailyDone) || "{}"); } catch { dailyDone = {}; }
+  try { startWeek = JSON.parse(localStorage.getItem(LS.startWeek) || "null"); } catch { startWeek = null; }
+
+  return { general, dailyDone, startWeek };
 }
 
 function applyRemoteState(data) {
@@ -202,19 +207,17 @@ function applyRemoteState(data) {
 }
 
 function pushStateToFirebase() {
-  if (applyingRemote) return; // keine Writes während Remote-Apply
+  if (applyingRemote) return;
   const payload = getLocalSyncState();
   payload.updatedAt = Date.now();
   return roomRef.update(payload);
 }
 
-// Live listener: Remote -> Local
+// Live listener
 roomRef.on("value", (snap) => {
   const data = snap.val();
-  hasRemoteOnce = true;
-
-  // Wenn Room leer ist: initial einmal lokalen Zustand hochschieben
   if (!data) {
+    // Room leer -> initial local hochpushen
     pushStateToFirebase();
     return;
   }
@@ -226,14 +229,15 @@ roomRef.on("value", (snap) => {
    ========================= */
 
 function render() {
-  const me = localStorage.getItem(LS.me);
+  const me = CURRENT_USER;
 
-  // Login / App View
+  // Login / App View (NFC: immer erst wählen)
   if (!PEOPLE.includes(me)) {
     document.getElementById("loginView").classList.remove("hidden");
     document.getElementById("appView").classList.add("hidden");
     return;
   }
+
   document.getElementById("loginView").classList.add("hidden");
   document.getElementById("appView").classList.remove("hidden");
 
@@ -270,6 +274,7 @@ function render() {
       const li = document.createElement("li");
       li.textContent = t;
 
+      // Klick = erledigt (verschwindet)
       li.onclick = () => animateRemoval(li, () => {
         dailyDoneState.tasks.push(t);
         localStorage.setItem(LS.dailyDone, JSON.stringify(dailyDoneState));
@@ -311,7 +316,7 @@ function render() {
     wrap.appendChild(item);
   });
 
-  // Übersicht Tabelle (12 Wochen, sicher über Jahreswechsel)
+  // Übersicht Tabelle (12 Wochen)
   const rotationBody = document.getElementById("rotationBody");
   if (rotationBody) {
     rotationBody.innerHTML = "";
@@ -357,19 +362,21 @@ document.getElementById("toggleOverview").onclick = function () {
   }
 };
 
-// Login / Switch
+// Login: User nur temporär setzen
 document.getElementById("loginWoody").onclick = () => {
-  localStorage.setItem(LS.me, "Woody");
+  CURRENT_USER = "Woody";
   render();
 };
 document.getElementById("loginMarkus").onclick = () => {
-  localStorage.setItem(LS.me, "Markus");
-  render();
-};
-document.getElementById("switchBtn").onclick = () => {
-  localStorage.removeItem(LS.me);
+  CURRENT_USER = "Markus";
   render();
 };
 
-// Start
+// Switch (Profil wechseln)
+document.getElementById("switchBtn").onclick = () => {
+  CURRENT_USER = null; // zurück zur Auswahl
+  render();
+};
+
+// Start (zeigt Login)
 render();
