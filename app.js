@@ -1,12 +1,18 @@
-/* app.js — WG Plan (NFC-ready)
-   ✅ fragt JEDES MAL "Wer bist du?" (kein User-Speichern im localStorage)
-   ✅ Firebase Realtime DB Live-Sync (gleicher Stand auf allen Geräten)
-   ✅ Übersicht (12 Wochen) funktioniert über Jahreswechsel
-   ✅ Fairer Wochenplan: WC und Bad nie zusammen bei gleicher Person + Split von WC vs Küche/Saugen
+/* app.js — WG Plan (NFC-ready) + Firebase Live-Sync + Fairer Plan + Übersicht + UNDO (Retour)
 
-   WICHTIG in index.html VOR app.js einbinden:
-   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+✅ NFC: fragt bei JEDEM Öffnen "Wer bist du?" (User wird NICHT gespeichert)
+✅ Firebase Realtime DB: gleicher Stand auf allen Geräten
+✅ Übersicht: nächste 12 Wochen (korrekt über Jahreswechsel)
+✅ Fairness: WC & Bad nie in derselben Woche bei gleicher Person, WC vs Küche/Saugen gesplittet
+✅ Retoure-Button: holt die zuletzt weggeclickte Wochenaufgabe zurück (inkl. Sync)
+
+WICHTIG in index.html VOR app.js einbinden:
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
+UNDO Button in HTML (empfohlen):
+<button id="undoWeekly" class="undo-btn hidden" type="button">Retour</button>
+(Wenn er fehlt, crasht nichts — es passiert einfach nichts.)
 */
 
 const PEOPLE = ["Woody", "Markus"];
@@ -62,20 +68,20 @@ function togglePerson(p) {
 }
 
 function mod(n, m) {
-  return ((n % m) + m) % m; // sauber bei negativen Zahlen
+  return ((n % m) + m) % m;
 }
 
 /* =========================
    FAIRER WOCHENPLAN
    - Papier jede Woche abwechselnd
-   - "Putzblock" alle 2 Wochen aktiv:
+   - Putzblock alle 2 Wochen:
        WC bei Person A, Küche+Saugen bei Person B
    - Bad alle 3 Wochen, NIE in derselben Woche wie WC bei gleicher Person
    - Sieb alle 4 Wochen
    ========================= */
 
 function getWeekPlan(kw) {
-  const start = 9;       // Anker-KW
+  const start = 9; // Anker-KW
   const diff = kw - start;
 
   const plan = { Woody: [], Markus: [] };
@@ -95,7 +101,7 @@ function getWeekPlan(kw) {
     add(other, "Staubsaugen / wischen");
   }
 
-  // Bad alle 3 Wochen, aber nicht zusammen mit WC bei gleicher Person
+  // Bad alle 3 Wochen (nicht mit WC bei gleicher Person)
   if (mod(diff, 3) === 0) {
     let badTurn = (mod(Math.floor(diff / 3), 2) === 0) ? "Markus" : "Woody";
     if (plan[badTurn].includes("WC putzen")) badTurn = togglePerson(badTurn);
@@ -108,7 +114,7 @@ function getWeekPlan(kw) {
     add(siebTurn, "Spülmaschine Sieb");
   }
 
-  // Optional: Kappung (max 3 Tasks/Person) -> shift Küche/Saugen wenn nötig
+  // Optional: cap 3 tasks/person (shift Küche/Saugen wenn nötig)
   const cap = 3;
   for (const p of ["Woody", "Markus"]) {
     const o = togglePerson(p);
@@ -175,7 +181,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-// Raum für euch (kann bleiben)
+// gemeinsamer Raum
 const ROOM_ID = "woody-markus";
 const roomRef = db.ref("rooms/" + ROOM_ID);
 
@@ -217,12 +223,31 @@ function pushStateToFirebase() {
 roomRef.on("value", (snap) => {
   const data = snap.val();
   if (!data) {
-    // Room leer -> initial local hochpushen
-    pushStateToFirebase();
+    pushStateToFirebase(); // initial
     return;
   }
   applyRemoteState(data);
 });
+
+/* =========================
+   UNDO Helpers
+   ========================= */
+
+function loadDailyDoneState() {
+  let s;
+  try {
+    s = JSON.parse(localStorage.getItem(LS.dailyDone)) || { date: todayFullStr(), tasks: [] };
+  } catch {
+    s = { date: todayFullStr(), tasks: [] };
+  }
+  if (s.date !== todayFullStr()) s = { date: todayFullStr(), tasks: [] };
+  if (!Array.isArray(s.tasks)) s.tasks = [];
+  return s;
+}
+
+function saveDailyDoneState(s) {
+  localStorage.setItem(LS.dailyDone, JSON.stringify(s));
+}
 
 /* =========================
    RENDER
@@ -231,15 +256,15 @@ roomRef.on("value", (snap) => {
 function render() {
   const me = CURRENT_USER;
 
-  // Login / App View (NFC: immer erst wählen)
+  // Login / App View
   if (!PEOPLE.includes(me)) {
-    document.getElementById("loginView").classList.remove("hidden");
-    document.getElementById("appView").classList.add("hidden");
+    document.getElementById("loginView")?.classList.remove("hidden");
+    document.getElementById("appView")?.classList.add("hidden");
     return;
   }
 
-  document.getElementById("loginView").classList.add("hidden");
-  document.getElementById("appView").classList.remove("hidden");
+  document.getElementById("loginView")?.classList.add("hidden");
+  document.getElementById("appView")?.classList.remove("hidden");
 
   const w = isoWeek(new Date());
 
@@ -253,13 +278,14 @@ function render() {
   const ul = document.getElementById("weeklyTasks");
   ul.innerHTML = "";
 
-  let dailyDoneState = {};
-  try {
-    dailyDoneState = JSON.parse(localStorage.getItem(LS.dailyDone)) || { date: todayFullStr(), tasks: [] };
-  } catch {
-    dailyDoneState = { date: todayFullStr(), tasks: [] };
+  const dailyDoneState = loadDailyDoneState();
+
+  // Undo button show/hide
+  const undoBtn = document.getElementById("undoWeekly");
+  if (undoBtn) {
+    if (dailyDoneState.tasks.length > 0) undoBtn.classList.remove("hidden");
+    else undoBtn.classList.add("hidden");
   }
-  if (dailyDoneState.date !== todayFullStr()) dailyDoneState = { date: todayFullStr(), tasks: [] };
 
   if (!list) {
     const li = document.createElement("li");
@@ -277,8 +303,8 @@ function render() {
       // Klick = erledigt (verschwindet)
       li.onclick = () => animateRemoval(li, () => {
         dailyDoneState.tasks.push(t);
-        localStorage.setItem(LS.dailyDone, JSON.stringify(dailyDoneState));
-        pushStateToFirebase(); // ✅ Sync
+        saveDailyDoneState(dailyDoneState);
+        pushStateToFirebase(); // Sync
         render();
       });
 
@@ -301,7 +327,7 @@ function render() {
         <h3>${g.label}</h3>
         <p>Zuletzt: ${state[g.id].lastDone || "—"}</p>
       </div>
-      <button class="btn-done">ERLEDIGT</button>
+      <button class="btn-done" type="button">ERLEDIGT</button>
     `;
 
     item.querySelector("button").onclick = () => animateRemoval(item, () => {
@@ -309,7 +335,7 @@ function render() {
       state[g.id].lastDone = `${me} (${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.)`;
       state[g.id].next = togglePerson(me);
       localStorage.setItem(LS.general, JSON.stringify(state));
-      pushStateToFirebase(); // ✅ Sync
+      pushStateToFirebase(); // Sync
       render();
     });
 
@@ -348,10 +374,11 @@ function render() {
    ========================= */
 
 // Übersicht Toggle: beim Öffnen rendern
-document.getElementById("toggleOverview").onclick = function () {
+document.getElementById("toggleOverview")?.addEventListener("click", function () {
   const content = document.getElementById("overviewContent");
-  const isHidden = content.classList.contains("hidden");
+  if (!content) return;
 
+  const isHidden = content.classList.contains("hidden");
   if (isHidden) {
     content.classList.remove("hidden");
     this.textContent = "Übersicht ausblenden ↑";
@@ -360,23 +387,37 @@ document.getElementById("toggleOverview").onclick = function () {
     content.classList.add("hidden");
     this.textContent = "Übersicht anzeigen ↓";
   }
-};
+});
 
 // Login: User nur temporär setzen
-document.getElementById("loginWoody").onclick = () => {
+document.getElementById("loginWoody")?.addEventListener("click", () => {
   CURRENT_USER = "Woody";
   render();
-};
-document.getElementById("loginMarkus").onclick = () => {
+});
+
+document.getElementById("loginMarkus")?.addEventListener("click", () => {
   CURRENT_USER = "Markus";
   render();
-};
+});
 
 // Switch (Profil wechseln)
-document.getElementById("switchBtn").onclick = () => {
-  CURRENT_USER = null; // zurück zur Auswahl
+document.getElementById("switchBtn")?.addEventListener("click", () => {
+  CURRENT_USER = null;
   render();
-};
+});
 
-// Start (zeigt Login)
+// UNDO (Retour) — letzte erledigte Wochenaufgabe zurückholen
+document.getElementById("undoWeekly")?.addEventListener("click", () => {
+  if (!PEOPLE.includes(CURRENT_USER)) return;
+
+  const s = loadDailyDoneState();
+  if (s.tasks.length === 0) return;
+
+  s.tasks.pop(); // letzte erledigte Aufgabe wieder "sichtbar" machen
+  saveDailyDoneState(s);
+  pushStateToFirebase(); // Sync
+  render();
+});
+
+// Start
 render();
